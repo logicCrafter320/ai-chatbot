@@ -284,11 +284,11 @@ export default function Home() {
                     <MessageSquare className="h-4 w-4 flex-shrink-0 opacity-60" />
                     <span className="truncate">{conv.title || "New Conversation"}</span>
                   </div>
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 hover:bg-primary/10 hover:text-primary"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 hover:bg-primary/10 hover:text-primary transition-opacity"
                       onClick={(e) => handleArchive(e, conv.id)}
                       title="Archive"
                       data-testid={`button-archive-${conv.id}`}
@@ -298,7 +298,7 @@ export default function Home() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive"
+                      className="h-6 w-6 hover:bg-destructive/10 hover:text-destructive text-muted-foreground/50"
                       onClick={(e) => handleDelete(e, conv.id)}
                       title="Delete"
                       data-testid={`button-delete-${conv.id}`}
