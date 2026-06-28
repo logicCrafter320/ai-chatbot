@@ -132,6 +132,13 @@
   }
 }
 
+/* Hide Replit badge */
+.replit-badge,
+[data-replit-badge],
+iframe[src*="replit"] {
+  display: none !important;
+}
+
 .typewriter-cursor {
   display: inline-block;
   width: 2px;

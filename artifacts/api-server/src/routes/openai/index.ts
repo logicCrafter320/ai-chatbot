@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { conversations, messages } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, isNull, isNotNull } from "drizzle-orm";
 import {
   GetOpenaiConversationParams,
   DeleteOpenaiConversationParams,
@@ -23,11 +23,17 @@ const SYSTEM_PROMPT =
 const router = Router();
 
 router.get("/openai/conversations", async (req, res) => {
+  const archived = req.query.archived === "true";
   const all = await db
     .select()
     .from(conversations)
+    .where(archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt))
     .orderBy(conversations.createdAt);
-  res.json(all.map((c) => ({ ...c, createdAt: c.createdAt.toISOString() })));
+  res.json(all.map((c) => ({
+    ...c,
+    createdAt: c.createdAt.toISOString(),
+    archivedAt: c.archivedAt ? c.archivedAt.toISOString() : null,
+  })));
 });
 
 router.post("/openai/conversations", async (req, res) => {
@@ -40,7 +46,7 @@ router.post("/openai/conversations", async (req, res) => {
     .insert(conversations)
     .values({ title: parsed.data.title })
     .returning();
-  res.status(201).json({ ...created, createdAt: created.createdAt.toISOString() });
+  res.status(201).json({ ...created, createdAt: created.createdAt.toISOString(), archivedAt: null });
 });
 
 router.get("/openai/conversations/:id", async (req, res) => {
@@ -64,8 +70,35 @@ router.get("/openai/conversations/:id", async (req, res) => {
   res.json({
     ...conv,
     createdAt: conv.createdAt.toISOString(),
+    archivedAt: conv.archivedAt ? conv.archivedAt.toISOString() : null,
     messages: msgs.map((m) => ({ ...m, createdAt: m.createdAt.toISOString() })),
   });
+});
+
+router.patch("/openai/conversations/:id/archive", async (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const existing = await db.query.conversations.findFirst({ where: eq(conversations.id, id) });
+  if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+  const [updated] = await db
+    .update(conversations)
+    .set({ archivedAt: new Date() })
+    .where(eq(conversations.id, id))
+    .returning();
+  res.json({ ...updated, createdAt: updated.createdAt.toISOString(), archivedAt: updated.archivedAt!.toISOString() });
+});
+
+router.patch("/openai/conversations/:id/unarchive", async (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const existing = await db.query.conversations.findFirst({ where: eq(conversations.id, id) });
+  if (!existing) { res.status(404).json({ error: "Not found" }); return; }
+  const [updated] = await db
+    .update(conversations)
+    .set({ archivedAt: null })
+    .where(eq(conversations.id, id))
+    .returning();
+  res.json({ ...updated, createdAt: updated.createdAt.toISOString(), archivedAt: null });
 });
 
 router.delete("/openai/conversations/:id", async (req, res) => {
