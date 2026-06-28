@@ -10,10 +10,15 @@ import {
   SendOpenaiMessageBody,
   CreateOpenaiConversationBody,
 } from "@workspace/api-zod";
+import OpenAI from "openai";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
-const SYSTEM_PROMPT = "You are a helpful, friendly, and concise AI assistant. Answer clearly and in simple language.";
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
+
+const SYSTEM_PROMPT =
+  "You are a helpful, friendly, and concise AI assistant. Answer clearly and in simple language.";
 
 const router = Router();
 
@@ -125,10 +130,9 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     .where(eq(messages.conversationId, convId))
     .orderBy(messages.createdAt);
 
-  // Gemini uses "user" and "model" roles (not "assistant")
-  const contents = history.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
+  const chatMessages = history.map((m) => ({
+    role: m.role as "user" | "assistant",
+    content: m.content,
   }));
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -137,51 +141,20 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
 
   let fullResponse = "";
   try {
-    const geminiRes = await fetch(GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: SYSTEM_PROMPT }],
-        },
-        contents,
-      }),
+    const stream = await groq.chat.completions.create({
+      model: "llama3-8b-8192",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...chatMessages,
+      ],
+      stream: true,
     });
 
-    if (!geminiRes.ok || !geminiRes.body) {
-      const errText = await geminiRes.text();
-      req.log.error({ status: geminiRes.status, errText }, "Gemini API error");
-      res.write(`data: ${JSON.stringify({ error: "Gemini API error" })}\n\n`);
-      res.end();
-      return;
-    }
-
-    const reader = geminiRes.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const jsonStr = line.slice(5).trim();
-        if (!jsonStr) continue;
-        try {
-          const parsed = JSON.parse(jsonStr);
-          const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            fullResponse += text;
-            res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
-          }
-        } catch {
-          // skip malformed chunks
-        }
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        fullResponse += content;
+        res.write(`data: ${JSON.stringify({ content })}\n\n`);
       }
     }
 
@@ -194,7 +167,7 @@ router.post("/openai/conversations/:id/messages", async (req, res) => {
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
   } catch (err) {
-    req.log.error({ err }, "Gemini streaming error");
+    req.log.error({ err }, "Groq streaming error");
     res.write(`data: ${JSON.stringify({ error: "AI error occurred" })}\n\n`);
     res.end();
   }
